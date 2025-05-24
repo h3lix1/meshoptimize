@@ -226,4 +226,36 @@ The "Export HTML" feature creates a standalone file that:
 6. ✅ **Adjust node separation and label size** for optimal readability
 7. ✅ **Export to HTML** when you have a good view to share
 
-The enhanced visualization transforms your "rats nest" into a clear, interactive tool for understanding and optimizing your mesh network! 
+The enhanced visualization transforms your "rats nest" into a clear, interactive tool for understanding and optimizing your mesh network!
+
+### Enhanced Click Interactivity
+
+The network visualization now supports advanced click functionality that provides detailed insights into node connections:
+
+#### Node Click Behavior
+- **Single Click**: Click on any node to highlight it and all its connections
+  - The clicked node turns **orange** to indicate selection
+  - Connected nodes remain in their original colors and show labels
+  - All other nodes are **dimmed** (gray, semi-transparent) to focus attention
+  - Edges connected to the selected node are **highlighted in orange** with increased thickness
+  - Other edges are dimmed to reduce visual clutter
+
+#### Visual Feedback
+- **Selected Node**: Highlighted in bright orange (#FF6F00)
+- **Connected Nodes**: Retain original colors (blue for routers, green for clients, etc.)
+- **Connected Node Labels**: Always visible when a node is selected, showing node IDs or names
+- **Highlighted Edges**: Orange color with 3x thickness for edges connected to the selected node
+- **Dimmed Elements**: Unconnected nodes and edges fade to gray with reduced opacity
+
+#### Clearing Selection
+- **Click Same Node**: Click the already-selected node to clear the selection
+- **Double-Click Anywhere**: Double-click on the visualization to clear all highlighting
+- **Clear Highlights Button**: Use the "Clear Highlights" button in the control panel
+
+#### Benefits
+- **Topology Understanding**: Quickly see which nodes are directly connected
+- **Network Analysis**: Identify hub nodes and understand local connectivity patterns
+- **Troubleshooting**: Focus on specific node neighborhoods for debugging
+- **Performance Assessment**: Visualize the impact of individual nodes on network connectivity
+
+## Layout Algorithms 

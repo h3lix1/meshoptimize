@@ -20,7 +20,6 @@ from datetime import datetime
 import json
 
 from data_fetcher import MeshDataFetcher, DataProcessor
-from network_analyzer import NetworkAnalyzer
 from network_analyzer_optimized import OptimizedNetworkAnalyzer
 from visualization import NetworkVisualizer, PlotlyNetworkVisualizer
 from interactive_visualization import InteractiveNetworkVisualizer

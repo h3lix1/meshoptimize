@@ -59,10 +59,10 @@ python mesh_optimizer.py
 The application consists of several modules:
 
 - `mesh_optimizer.py`: Main application entry point and GUI
-- `network_analyzer.py`: Core network analysis algorithms
+- `network_analyzer_optimized.py`: Optimized network analysis algorithms with parallel processing
 - `data_fetcher.py`: Handles data retrieval from Meshtastic sources
+- `interactive_visualization.py`: Advanced interactive network visualization
 - `visualization.py`: Network visualization components
-- `scoring_engine.py`: Node scoring and evaluation algorithms
 - `optimization_worker.py`: Background workers for optimization tasks
 
 ## Algorithms

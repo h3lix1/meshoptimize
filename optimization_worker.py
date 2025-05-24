@@ -8,12 +8,7 @@ from typing import Dict, List, Tuple, Optional
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from network_analyzer import NetworkAnalyzer
-try:
-    from network_analyzer_optimized import OptimizedNetworkAnalyzer
-    USE_OPTIMIZED = True
-except ImportError:
-    USE_OPTIMIZED = False
+from network_analyzer_optimized import OptimizedNetworkAnalyzer
 import copy
 
 logger = logging.getLogger(__name__)
@@ -42,10 +37,7 @@ class OptimizationWorker(QThread):
             self.progress.emit(10)
             
             # Create analyzer - use optimized version if available
-            if USE_OPTIMIZED:
-                analyzer = OptimizedNetworkAnalyzer(self.nodes, self.edges, max_workers=4)
-            else:
-                analyzer = NetworkAnalyzer(self.nodes, self.edges)
+            analyzer = OptimizedNetworkAnalyzer(self.nodes, self.edges, max_workers=4)
             
             # Analyze current network health
             self.status.emit("Analyzing network health...")
@@ -126,7 +118,7 @@ class OptimizationWorker(QThread):
         """Cancel the optimization process."""
         self.is_cancelled = True
         
-    def _generate_recommendations(self, analyzer: NetworkAnalyzer, 
+    def _generate_recommendations(self, analyzer: OptimizedNetworkAnalyzer, 
                                 redundant_routers: List[str],
                                 promotion_candidates: List[Tuple[str, float]],
                                 current_health: Dict,
