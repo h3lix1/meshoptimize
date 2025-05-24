@@ -85,13 +85,13 @@ class MeshOptimizerGUI(QMainWindow):
         self.health_widget = self._create_health_widget()
         self.tab_widget.addTab(self.health_widget, "Network Health")
         
-        # Router Rankings Tab
-        self.router_table = self._create_router_rankings_table()
-        self.tab_widget.addTab(self.router_table, "Router Rankings")
+        # Node Scores Tab
+        self.scores_table = self._create_scores_table()
+        self.tab_widget.addTab(self.scores_table, "Node Scores")
         
-        # Redundancy Analysis Tab
-        self.redundancy_widget = self._create_redundancy_widget()
-        self.tab_widget.addTab(self.redundancy_widget, "Redundancy Analysis")
+        # Recommendations Tab
+        self.recommendations_widget = self._create_recommendations_widget()
+        self.tab_widget.addTab(self.recommendations_widget, "Recommendations")
         
         # Simulation Tab
         self.simulation_widget = self._create_simulation_widget()
@@ -156,7 +156,7 @@ class MeshOptimizerGUI(QMainWindow):
         
     def _create_control_panel(self):
         """Create the control panel with sliders and buttons."""
-        panel = QGroupBox("Network Analysis Controls")
+        panel = QGroupBox("Optimization Controls")
         layout = QHBoxLayout()
         
         # Channel filter
@@ -172,55 +172,64 @@ class MeshOptimizerGUI(QMainWindow):
         channel_group.setLayout(channel_layout)
         layout.addWidget(channel_group)
         
-        # Analysis thresholds
-        thresholds_group = QGroupBox("Analysis Thresholds")
-        thresholds_layout = QVBoxLayout()
+        # Redundancy control
+        redundancy_group = QGroupBox("Redundancy")
+        redundancy_layout = QVBoxLayout()
         
-        # Redundancy threshold
-        self.redundancy_threshold = QDoubleSpinBox()
-        self.redundancy_threshold.setMinimum(0.0)
-        self.redundancy_threshold.setMaximum(1.0)
-        self.redundancy_threshold.setSingleStep(0.1)
-        self.redundancy_threshold.setValue(0.8)
-        self.redundancy_threshold.setToolTip("Routers with redundancy above this are considered redundant")
+        self.redundancy_slider = QSlider(Qt.Orientation.Horizontal)
+        self.redundancy_slider.setMinimum(1)
+        self.redundancy_slider.setMaximum(5)
+        self.redundancy_slider.setValue(2)
+        self.redundancy_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.redundancy_slider.setTickInterval(1)
+        self.redundancy_slider.valueChanged.connect(self._on_redundancy_changed)
         
-        thresholds_layout.addWidget(QLabel("Redundancy Threshold:"))
-        thresholds_layout.addWidget(self.redundancy_threshold)
+        self.redundancy_label = QLabel("Required Redundancy: 2")
+        redundancy_layout.addWidget(self.redundancy_label)
+        redundancy_layout.addWidget(self.redundancy_slider)
+        redundancy_group.setLayout(redundancy_layout)
+        layout.addWidget(redundancy_group)
         
-        # Impact threshold
-        self.impact_threshold = QSpinBox()
-        self.impact_threshold.setMinimum(0)
-        self.impact_threshold.setMaximum(100)
-        self.impact_threshold.setValue(10)
-        self.impact_threshold.setToolTip("Minimum removal impact to consider a router important")
+        # Max hops control
+        hops_group = QGroupBox("Max Hops")
+        hops_layout = QVBoxLayout()
         
-        thresholds_layout.addWidget(QLabel("Impact Threshold:"))
-        thresholds_layout.addWidget(self.impact_threshold)
+        self.hops_spin = QSpinBox()
+        self.hops_spin.setMinimum(3)
+        self.hops_spin.setMaximum(10)
+        self.hops_spin.setValue(5)
         
-        thresholds_group.setLayout(thresholds_layout)
-        layout.addWidget(thresholds_group)
+        hops_layout.addWidget(QLabel("Maximum Hops:"))
+        hops_layout.addWidget(self.hops_spin)
+        hops_group.setLayout(hops_layout)
+        layout.addWidget(hops_group)
         
-        # Display options
-        display_group = QGroupBox("Display Options")
-        display_layout = QVBoxLayout()
+        # Scoring weights
+        weights_group = QGroupBox("Scoring Weights")
+        weights_layout = QVBoxLayout()
         
-        self.show_redundant_cb = QCheckBox("Highlight Redundant Routers")
-        self.show_redundant_cb.setChecked(True)
-        self.show_redundant_cb.stateChanged.connect(self._update_visualization_highlights)
-        display_layout.addWidget(self.show_redundant_cb)
+        self.weight_sliders = {}
+        weight_names = ['coverage', 'centrality', 'redundancy', 'hop_reduction', 'critical_path']
         
-        self.show_critical_cb = QCheckBox("Highlight Critical Routers")
-        self.show_critical_cb.setChecked(True)
-        self.show_critical_cb.stateChanged.connect(self._update_visualization_highlights)
-        display_layout.addWidget(self.show_critical_cb)
-        
-        self.show_ranks_cb = QCheckBox("Show Router Ranks")
-        self.show_ranks_cb.setChecked(False)
-        self.show_ranks_cb.stateChanged.connect(self._update_visualization_highlights)
-        display_layout.addWidget(self.show_ranks_cb)
-        
-        display_group.setLayout(display_layout)
-        layout.addWidget(display_group)
+        for weight_name in weight_names:
+            weight_layout = QHBoxLayout()
+            label = QLabel(f"{weight_name.replace('_', ' ').title()}:")
+            label.setFixedWidth(100)
+            weight_layout.addWidget(label)
+            
+            slider = QDoubleSpinBox()
+            slider.setMinimum(0.0)
+            slider.setMaximum(2.0)
+            slider.setSingleStep(0.1)
+            slider.setValue(1.0)
+            slider.valueChanged.connect(self._on_weight_changed)
+            
+            self.weight_sliders[weight_name] = slider
+            weight_layout.addWidget(slider)
+            weights_layout.addLayout(weight_layout)
+            
+        weights_group.setLayout(weights_layout)
+        layout.addWidget(weights_group)
         
         # Action buttons
         buttons_group = QGroupBox("Actions")
@@ -230,14 +239,15 @@ class MeshOptimizerGUI(QMainWindow):
         self.load_button.clicked.connect(self._load_data_from_url)
         buttons_layout.addWidget(self.load_button)
         
-        self.analyze_button = QPushButton("Analyze Routers")
-        self.analyze_button.clicked.connect(self._analyze_routers)
-        self.analyze_button.setStyleSheet("QPushButton { background-color: #2196F3; color: white; }")
-        buttons_layout.addWidget(self.analyze_button)
+        self.optimize_button = QPushButton("Optimize Network")
+        self.optimize_button.clicked.connect(self._run_optimization)
+        self.optimize_button.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; }")
+        buttons_layout.addWidget(self.optimize_button)
         
-        self.export_button = QPushButton("Export Analysis")
-        self.export_button.clicked.connect(self._export_router_analysis)
-        buttons_layout.addWidget(self.export_button)
+        self.apply_button = QPushButton("Apply Changes")
+        self.apply_button.clicked.connect(self._apply_changes)
+        self.apply_button.setEnabled(False)
+        buttons_layout.addWidget(self.apply_button)
         
         self.reset_button = QPushButton("Reset View")
         self.reset_button.clicked.connect(self._reset_view)
@@ -267,42 +277,28 @@ class MeshOptimizerGUI(QMainWindow):
         widget.setLayout(layout)
         return widget
         
-    def _create_router_rankings_table(self):
-        """Create table for displaying router rankings."""
+    def _create_scores_table(self):
+        """Create table for displaying node scores."""
         table = QTableWidget()
-        table.setColumnCount(9)
+        table.setColumnCount(7)
         table.setHorizontalHeaderLabels([
-            "Rank", "Router ID", "Label", "Contribution Score", 
-            "Unique Coverage", "Clients Served", "Critical Paths",
-            "Removal Impact", "Status"
+            "Node ID", "Label", "Role", "Coverage", "Centrality", 
+            "Redundancy", "Total Score"
         ])
-        table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         table.setSortingEnabled(True)
-        table.itemSelectionChanged.connect(self._on_router_table_selection_changed)
+        table.itemSelectionChanged.connect(self._on_table_selection_changed)
         return table
         
-    def _create_redundancy_widget(self):
-        """Create widget for displaying redundancy analysis."""
+    def _create_recommendations_widget(self):
+        """Create widget for displaying optimization recommendations."""
         widget = QWidget()
         layout = QVBoxLayout()
         
-        # Summary section
-        self.redundancy_summary = QTextEdit()
-        self.redundancy_summary.setMaximumHeight(150)
-        self.redundancy_summary.setReadOnly(True)
-        layout.addWidget(QLabel("Redundancy Summary:"))
-        layout.addWidget(self.redundancy_summary)
+        self.recommendations_text = QTextEdit()
+        self.recommendations_text.setReadOnly(True)
         
-        # Detailed analysis
-        self.redundancy_details = QTextEdit()
-        self.redundancy_details.setReadOnly(True)
-        font = QFont()
-        font.setFamily("monospace")
-        font.setStyleHint(QFont.StyleHint.Monospace)
-        self.redundancy_details.setFont(font)
-        layout.addWidget(QLabel("Detailed Analysis:"))
-        layout.addWidget(self.redundancy_details)
-        
+        layout.addWidget(self.recommendations_text)
         widget.setLayout(layout)
         return widget
         
@@ -319,28 +315,16 @@ class MeshOptimizerGUI(QMainWindow):
         return widget
         
     @pyqtSlot()
-    def _update_visualization_highlights(self):
-        """Update visualization based on display options."""
-        if not self.current_nodes:
-            return
-            
-        # Update node highlights based on router analysis
-        if hasattr(self, 'router_analyses'):
-            highlights = {}
-            
-            for analysis in self.router_analyses:
-                node_id = analysis.node_id
-                
-                if self.show_redundant_cb.isChecked() and analysis.is_redundant:
-                    highlights[node_id] = {'color': '#FF9800', 'label': f"Redundant (Rank {analysis.rank})"}
-                elif self.show_critical_cb.isChecked() and analysis.critical_connections > 50:
-                    highlights[node_id] = {'color': '#F44336', 'label': f"Critical (Rank {analysis.rank})"}
-                elif self.show_ranks_cb.isChecked():
-                    highlights[node_id] = {'label': f"Rank {analysis.rank}"}
-                    
-            # Apply highlights to visualization
-            # This would need to be implemented in the visualization widget
-            # self.network_viz.set_node_highlights(highlights)
+    def _on_redundancy_changed(self):
+        """Handle redundancy slider change."""
+        value = self.redundancy_slider.value()
+        self.redundancy_label.setText(f"Required Redundancy: {value}")
+        
+    @pyqtSlot()
+    def _on_weight_changed(self):
+        """Handle weight slider change."""
+        # Could trigger live updates if desired
+        pass
         
     @pyqtSlot(str)
     def _on_channel_changed(self, channel):
@@ -560,156 +544,6 @@ Vulnerable Nodes (1 connection): {len(health['vulnerable_nodes'])}
                 
         self.health_text.setText(health_text)
         
-    @pyqtSlot()
-    def _analyze_routers(self):
-        """Analyze routers and rank them by contribution."""
-        if not self.current_nodes:
-            QMessageBox.warning(self, "Warning", "Please load network data first")
-            return
-            
-        try:
-            self.statusBar().showMessage("Analyzing routers...")
-            self.progress_bar.setVisible(True)
-            self.progress_bar.setRange(0, 0)
-            
-            # Get filtered data for analysis
-            if self.selected_channel == "All Channels":
-                nodes_for_analysis = self.current_nodes
-                edges_for_analysis = self.current_edges
-            else:
-                # Filter by channel
-                filtered_node_ids = {
-                    node_id for node_id, node_data in self.current_nodes.items()
-                    if node_data.get('channel', '') == self.selected_channel
-                }
-                nodes_for_analysis = {
-                    node_id: node_data for node_id, node_data in self.current_nodes.items()
-                    if node_id in filtered_node_ids
-                }
-                edges_for_analysis = [
-                    edge for edge in self.current_edges
-                    if edge['from'] in filtered_node_ids and edge['to'] in filtered_node_ids
-                ]
-            
-            # Create analyzer
-            analyzer = NetworkAnalyzer(nodes_for_analysis, edges_for_analysis)
-            
-            # Get health metrics
-            health = analyzer.analyze_network_health()
-            self._update_health_display_with_data(health)
-            
-            # Analyze routers
-            self.router_analyses = analyzer.analyze_routers()
-            
-            # Update router rankings table
-            self._update_router_rankings_table()
-            
-            # Update redundancy analysis
-            self._update_redundancy_analysis()
-            
-            # Update visualization highlights
-            self._update_visualization_highlights()
-            
-            self.progress_bar.setVisible(False)
-            self.statusBar().showMessage(f"Analyzed {len(self.router_analyses)} routers")
-            
-        except Exception as e:
-            logger.error(f"Error analyzing routers: {e}")
-            self.progress_bar.setVisible(False)
-            QMessageBox.critical(self, "Error", f"Failed to analyze routers: {e}")
-            
-    def _update_router_rankings_table(self):
-        """Update the router rankings table with analysis results."""
-        self.router_table.setRowCount(len(self.router_analyses))
-        
-        for row, analysis in enumerate(self.router_analyses):
-            # Rank
-            self.router_table.setItem(row, 0, QTableWidgetItem(str(analysis.rank)))
-            
-            # Router ID
-            self.router_table.setItem(row, 1, QTableWidgetItem(analysis.node_id))
-            
-            # Label
-            self.router_table.setItem(row, 2, QTableWidgetItem(analysis.label))
-            
-            # Contribution Score
-            score_item = QTableWidgetItem(f"{analysis.contribution_score:.2f}")
-            self.router_table.setItem(row, 3, score_item)
-            
-            # Unique Coverage
-            self.router_table.setItem(row, 4, QTableWidgetItem(str(analysis.unique_coverage)))
-            
-            # Clients Served
-            self.router_table.setItem(row, 5, QTableWidgetItem(str(analysis.clients_served)))
-            
-            # Critical Paths
-            critical_item = QTableWidgetItem(str(analysis.critical_connections))
-            if analysis.critical_connections > 50:
-                critical_item.setBackground(Qt.GlobalColor.red)
-                critical_item.setForeground(Qt.GlobalColor.white)
-            self.router_table.setItem(row, 6, critical_item)
-            
-            # Removal Impact
-            impact_item = QTableWidgetItem(f"{analysis.removal_impact:.2f}")
-            if analysis.removal_impact > self.impact_threshold.value():
-                impact_item.setBackground(Qt.GlobalColor.yellow)
-            self.router_table.setItem(row, 7, impact_item)
-            
-            # Status
-            if analysis.is_redundant:
-                status_item = QTableWidgetItem("Redundant")
-                status_item.setBackground(Qt.GlobalColor.lightGray)
-                status_item.setToolTip(analysis.redundancy_reason)
-            else:
-                status_item = QTableWidgetItem("Essential")
-                status_item.setBackground(Qt.GlobalColor.green)
-                status_item.setForeground(Qt.GlobalColor.white)
-            self.router_table.setItem(row, 8, status_item)
-            
-    def _update_redundancy_analysis(self):
-        """Update the redundancy analysis display."""
-        redundant_routers = [a for a in self.router_analyses if a.is_redundant]
-        essential_routers = [a for a in self.router_analyses if not a.is_redundant]
-        
-        # Update summary
-        summary_text = f"""
-Total Routers: {len(self.router_analyses)}
-Essential Routers: {len(essential_routers)} ({len(essential_routers)/len(self.router_analyses)*100:.1f}%)
-Redundant Routers: {len(redundant_routers)} ({len(redundant_routers)/len(self.router_analyses)*100:.1f}%)
-
-Top 5 Most Important Routers:
-"""
-        for i, analysis in enumerate(essential_routers[:5]):
-            summary_text += f"{i+1}. {analysis.label} (Score: {analysis.contribution_score:.2f})\n"
-            
-        self.redundancy_summary.setText(summary_text.strip())
-        
-        # Update detailed analysis
-        details_text = "REDUNDANT ROUTERS ANALYSIS\n" + "="*60 + "\n\n"
-        
-        for analysis in redundant_routers:
-            details_text += f"Router: {analysis.label} (ID: {analysis.node_id})\n"
-            details_text += f"  Rank: {analysis.rank}\n"
-            details_text += f"  Redundancy Level: {analysis.redundancy_level:.2%}\n"
-            details_text += f"  Reason: {analysis.redundancy_reason}\n"
-            details_text += f"  Unique Coverage: {analysis.unique_coverage} nodes\n"
-            details_text += f"  Clients Served: {analysis.clients_served}\n"
-            details_text += f"  Removal Impact: {analysis.removal_impact:.2f}\n"
-            details_text += "-"*40 + "\n"
-            
-        details_text += "\n\nESSENTIAL ROUTERS ANALYSIS\n" + "="*60 + "\n\n"
-        
-        for analysis in essential_routers[:10]:  # Top 10 essential routers
-            details_text += f"Router: {analysis.label} (ID: {analysis.node_id})\n"
-            details_text += f"  Rank: {analysis.rank}\n"
-            details_text += f"  Contribution Score: {analysis.contribution_score:.2f}\n"
-            details_text += f"  Unique Coverage: {analysis.unique_coverage} nodes\n"
-            details_text += f"  Critical Connections: {analysis.critical_connections}\n"
-            details_text += f"  Removal Impact: {analysis.removal_impact:.2f}\n"
-            details_text += "-"*40 + "\n"
-            
-        self.redundancy_details.setText(details_text)
-    
     @pyqtSlot()
     def _run_optimization(self):
         """Run the network optimization."""
