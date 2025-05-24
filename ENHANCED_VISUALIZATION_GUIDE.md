@@ -53,7 +53,7 @@ Choose from these advanced layout algorithms:
 
 **Layout Controls:**
 - **Iterations Slider**: Control layout quality vs. speed (10-500 iterations)
-- **Node Separation**: Adjust spacing between nodes (0.5x - 3.0x)
+- ****: Adjust spacing between nodes (0.5x - 3.0x)
 
 ### **Display Filters**
 Fine-tune what you see:
