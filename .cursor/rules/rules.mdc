@@ -1,0 +1,119 @@
+# Meshtastic Network Optimizer - Project Rules
+
+## Project Overview
+This is a Python GUI application for optimizing router placement in Meshtastic mesh networks. The application analyzes nodes from meshview.bayme.sh/nodegraph, identifies redundant routers, suggests router demotions/promotions, and maintains network connectivity.
+
+## Key Files and Their Purposes
+
+### Main Application
+- [mesh_optimizer.py](mdc:mesh_optimizer.py) - Main GUI application using PyQt6. Entry point for the application.
+- [run_optimizer.sh](mdc:run_optimizer.sh) - Launch script for the application
+
+### Core Modules
+- [network_analyzer.py](mdc:network_analyzer.py) - Core network analysis algorithms using NetworkX
+- [network_analyzer_optimized.py](mdc:network_analyzer_optimized.py) - Optimized version with Numba acceleration and parallel processing
+- [data_fetcher.py](mdc:data_fetcher.py) - Web scraping and data parsing from meshview.bayme.sh
+- [visualization.py](mdc:visualization.py) - Network visualization using matplotlib and Plotly
+- [interactive_visualization.py](mdc:interactive_visualization.py) - Interactive Plotly visualization with WebGL for large networks
+- [optimization_worker.py](mdc:optimization_worker.py) - Background threading for optimization tasks
+
+### Configuration and Documentation
+- [requirements.txt](mdc:requirements.txt) - Python dependencies
+- [README.md](mdc:README.md) - Project documentation
+- [USAGE_GUIDE.md](mdc:USAGE_GUIDE.md) - User guide
+
+## Data Format from meshview.bayme.sh
+
+The site uses custom JavaScript object notation with:
+- Nodes: `name` (ID), `value` (label), `role`, `hw_model`, `channel`, `long_name`, `short_name`
+- Edges: `source`, `target`, `originalColor`, `lineStyle`
+- Roles: `CLIENT`, `ROUTER`, `ROUTER_LATE`, `CLIENT_MUTE`
+
+### Common Data Issues
+1. JavaScript format with backticks and unquoted keys
+2. Unicode emojis in node labels (e.g., 'BMS1🌳')
+3. Embedded functions in the JavaScript data
+
+## Known Issues and Solutions
+
+### 1. Unicode/Emoji Characters
+- Problem: Matplotlib crashes with Unicode emojis in labels
+- Solution: Use `sanitize_label()` function to strip problematic characters
+- Implementation in [visualization.py](mdc:visualization.py) and [interactive_visualization.py](mdc:interactive_visualization.py)
+
+### 2. Plotly CDN Loading
+- Problem: Plotly CDN doesn't load in QWebEngineView
+- Solution: Use `include_plotlyjs='inline'` to embed the library
+- Note: Creates ~4.6MB HTML files but ensures reliability
+
+### 3. NoneType Comparisons
+- Problem: SNR values can be None, causing comparison errors
+- Solution: Always check for None before numeric comparisons
+
+### 4. Performance with Large Networks
+- Problem: 359 nodes and 1358 edges cause performance issues
+- Solutions:
+  - Use [network_analyzer_optimized.py](mdc:network_analyzer_optimized.py) with Numba
+  - Implement parallel processing with ProcessPoolExecutor
+  - Use Plotly with WebGL (Scattergl) for visualization
+  - Sample-based algorithms for O(n²) operations
+
+## Technical Stack
+
+### Core Dependencies
+- PyQt6 (GUI framework)
+- PyQt6-WebEngine (for Plotly visualization)
+- NetworkX (graph algorithms)
+- Plotly (interactive visualization)
+- NumPy/Pandas (data processing)
+- Numba (performance optimization)
+- BeautifulSoup4/lxml (web scraping)
+
+### Key Algorithms
+1. **Node Scoring**: Multi-criteria system with configurable weights
+   - Coverage score
+   - Centrality score
+   - Redundancy score
+   - Hop reduction score
+   - Critical path score
+
+2. **Optimization Goals**:
+   - Maintain network connectivity
+   - Keep redundancy (2-3 connections per node)
+   - Limit hop counts below 5
+   - Minimize router count
+
+## GUI Architecture
+
+The application uses a splitter layout:
+- Left: Interactive network visualization
+- Right: Tabbed interface with:
+  - Network Health metrics
+  - Node Scores table
+  - Recommendations
+  - Simulation results
+
+## Best Practices
+
+1. **Error Handling**: Always wrap data fetching in try-except blocks
+2. **Unicode Safety**: Use `sanitize_label()` for any user-visible text
+3. **Performance**: Use optimized analyzer for networks > 100 nodes
+4. **Visualization**: Prefer interactive Plotly over matplotlib for large networks
+5. **Threading**: Use QThread/Worker pattern for long-running operations
+
+## Color Coding Convention
+
+- Blue (#1E88E5): Router nodes
+- Green (#43A047): Client nodes
+- Yellow (#FDD835): Vulnerable nodes (1 connection)
+- Red (#E53935): Isolated nodes (0 connections)
+- Orange (#FF6F00): Promotion candidates
+- Purple (#8E24AA): Demotion candidates
+
+## Development Tips
+
+1. When modifying visualization, test with both sample data and real data
+2. Real data URL: https://meshview.bayme.sh/nodegraph
+3. Use regex-based parsing for JavaScript data format
+4. Always provide fallback for when real data is unavailable
+5. Log file sizes when creating HTML files for debugging 
