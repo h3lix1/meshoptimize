@@ -1,6 +1,7 @@
 """
 Data Fetcher Module for Meshtastic Network Optimizer
 Handles fetching and parsing network data from meshview.bayme.sh
+PERFORMANCE OPTIMIZED with caching, threading, and faster parsing
 """
 
 import requests
@@ -10,14 +11,16 @@ import re
 from typing import Dict, List, Tuple, Optional
 import logging
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
+import threading
+from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
 
 class MeshDataFetcher:
-    """Fetches and parses Meshtastic network data from various sources."""
+    """Fetches and parses Meshtastic network data from various sources - PERFORMANCE OPTIMIZED."""
     
     def __init__(self, url: str = "https://meshview.bayme.sh/nodegraph"):
         self.url = url
@@ -28,62 +31,64 @@ class MeshDataFetcher:
         self._cache = {}
         self._cache_time = None
         self.cache_duration = 300  # 5 minutes cache
+        self._cache_lock = threading.RLock()
+        
+        # Pre-compile regexes for performance
+        self._node_regex = re.compile(r'const\s+nodes\s*=\s*(\[[\s\S]*?\]);')
+        self._edge_regex = re.compile(r'const\s+edges\s*=\s*(\[[\s\S]*?\]);')
+        self._node_block_regex = re.compile(r'(?=\s*\{\s*name:)')
+        self._field_regexes = {
+            'name': re.compile(r'name:\s*`([^`]+)`'),
+            'value': re.compile(r'value:\s*`([^`]+)`'),
+            'role': re.compile(r'role:\s*`([^`]+)`'),
+            'hw_model': re.compile(r'hw_model:\s*`([^`]+)`'),
+            'short_name': re.compile(r'short_name:\s*`([^`]+)`'),
+            'long_name': re.compile(r'long_name:\s*`([^`]+)`'),
+            'channel': re.compile(r'channel:\s*`([^`]+)`')
+        }
         
     def fetch_network_data(self, use_cache: bool = True) -> Dict:
         """
-        Fetch network data from meshview.bayme.sh
+        Fetch network data from meshview.bayme.sh with performance optimizations.
         Returns a dictionary with nodes and edges data.
         """
-        # Check cache
-        if use_cache and self._cache_time:
-            if (datetime.now() - self._cache_time).seconds < self.cache_duration:
-                logger.info("Using cached data")
-                return self._cache
-                
+        # Check cache with thread safety
+        with self._cache_lock:
+            if use_cache and self._cache_time:
+                if (datetime.now() - self._cache_time).seconds < self.cache_duration:
+                    logger.info("Using cached data")
+                    return self._cache.copy()  # Return copy to avoid modification
+                    
         try:
             logger.info(f"Fetching data from {self.url}")
+            start_time = time.time()
+            
             response = self.session.get(self.url, timeout=30)
             response.raise_for_status()
             
-            # Parse HTML
+            fetch_time = time.time() - start_time
+            logger.info(f"Data fetched in {fetch_time:.2f}s")
+            
+            # Parse HTML with performance optimizations
+            parse_start = time.time()
             soup = BeautifulSoup(response.text, 'lxml')
             
-            # Extract JavaScript data
-            script_tags = soup.find_all('script')
+            # Extract JavaScript data more efficiently
+            script_content = self._extract_script_content(soup)
             
-            nodes_data = None
-            edges_data = None
+            # Parse nodes and edges in parallel
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                nodes_future = executor.submit(self._parse_nodes_fast, script_content)
+                edges_future = executor.submit(self._parse_edges_fast, script_content)
+                
+                nodes_data = nodes_future.result()
+                edges_data = edges_future.result()
             
-            for script in script_tags:
-                if script.string:
-                    content = script.string
-                    
-                    # Look for nodes in the meshview.bayme.sh format
-                    if nodes_data is None and 'const nodes = [' in content:
-                        nodes_match = re.search(r'const\s+nodes\s*=\s*(\[[\s\S]*?\]);', content)
-                        if nodes_match:
-                            try:
-                                nodes_str = nodes_match.group(1)
-                                # Parse the custom format
-                                nodes_data = self._parse_meshview_nodes(nodes_str)
-                                logger.info(f"Found {len(nodes_data)} nodes in meshview format")
-                            except Exception as e:
-                                logger.error(f"Failed to parse meshview nodes: {e}")
-                    
-                    # Look for edges in the meshview.bayme.sh format
-                    if edges_data is None and 'const edges = [' in content:
-                        edges_match = re.search(r'const\s+edges\s*=\s*(\[[\s\S]*?\]);', content)
-                        if edges_match:
-                            try:
-                                edges_str = edges_match.group(1)
-                                # Parse the custom format
-                                edges_data = self._parse_meshview_edges(edges_str)
-                                logger.info(f"Found {len(edges_data)} edges in meshview format")
-                            except Exception as e:
-                                logger.error(f"Failed to parse meshview edges: {e}")
+            parse_time = time.time() - parse_start
+            logger.info(f"Data parsed in {parse_time:.2f}s")
             
             # If we still don't have data, use sample data
-            if nodes_data is None or edges_data is None:
+            if not nodes_data or not edges_data:
                 logger.warning("Could not parse real data, using sample data")
                 return self.get_sample_data()
             
@@ -93,104 +98,165 @@ class MeshDataFetcher:
                 'timestamp': datetime.now().isoformat()
             }
             
-            # Update cache
-            self._cache = result
-            self._cache_time = datetime.now()
+            # Update cache with thread safety
+            with self._cache_lock:
+                self._cache = result.copy()
+                self._cache_time = datetime.now()
+            
+            total_time = time.time() - start_time
+            logger.info(f"Total fetch and parse time: {total_time:.2f}s")
             
             return result
             
         except requests.RequestException as e:
             logger.error(f"Failed to fetch data: {e}")
             # Return cached data if available
-            if self._cache:
-                logger.warning("Using stale cache due to fetch error")
-                return self._cache
+            with self._cache_lock:
+                if self._cache:
+                    logger.warning("Using stale cache due to fetch error")
+                    return self._cache.copy()
             # Otherwise return sample data
             logger.warning("No cache available, using sample data")
             return self.get_sample_data()
     
-    def _parse_meshview_nodes(self, js_str: str) -> List[Dict]:
-        """Parse nodes in the meshview.bayme.sh format."""
-        nodes = []
+    def _extract_script_content(self, soup) -> str:
+        """Extract relevant script content more efficiently."""
+        script_tags = soup.find_all('script')
         
-        # Split by node objects more carefully
-        # Look for patterns starting with { and containing name:
-        node_blocks = re.split(r'(?=\s*\{\s*name:)', js_str)
+        # Find the script containing both nodes and edges
+        for script in script_tags:
+            if script.string and 'const nodes = [' in script.string and 'const edges = [' in script.string:
+                return script.string
+        
+        # Fallback: concatenate all scripts
+        return '\n'.join(script.string or '' for script in script_tags)
+    
+    def _parse_nodes_fast(self, script_content: str) -> List[Dict]:
+        """Fast node parsing with optimized regex and parallel processing."""
+        nodes_match = self._node_regex.search(script_content)
+        if not nodes_match:
+            return []
+            
+        nodes_str = nodes_match.group(1)
+        
+        # Split into node blocks more efficiently
+        node_blocks = self._node_block_regex.split(nodes_str)
+        
+        # Process blocks in parallel batches
+        nodes = []
+        batch_size = 50
+        
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = []
+            for i in range(0, len(node_blocks), batch_size):
+                batch = node_blocks[i:i + batch_size]
+                future = executor.submit(self._process_node_batch, batch)
+                futures.append(future)
+            
+            for future in as_completed(futures):
+                nodes.extend(future.result())
+        
+        logger.info(f"Parsed {len(nodes)} nodes from raw data")
+        return nodes
+    
+    def _process_node_batch(self, node_blocks: List[str]) -> List[Dict]:
+        """Process a batch of node blocks."""
+        batch_nodes = []
         
         for block in node_blocks:
             if 'name:' not in block:
                 continue
                 
             try:
-                node_data = {}
-                
-                # Extract name (node ID)
-                name_match = re.search(r'name:\s*`([^`]+)`', block)
-                if name_match:
-                    node_data['id'] = name_match.group(1)
-                else:
-                    continue  # Skip if no ID
-                
-                # Extract value (label)
-                value_match = re.search(r'value:\s*`([^`]+)`', block)
-                if value_match:
-                    # Remove quotes and escape sequences from the value
-                    label = value_match.group(1).strip('"')
-                    # Decode unicode escapes
-                    try:
-                        label = label.encode('utf-8').decode('unicode_escape')
-                    except:
-                        pass
-                    node_data['label'] = label
-                
-                # Extract role
-                role_match = re.search(r'role:\s*`([^`]+)`', block)
-                if role_match:
-                    node_data['role'] = role_match.group(1)
-                else:
-                    node_data['role'] = 'CLIENT'
-                
-                # Extract hardware model
-                hw_match = re.search(r'hw_model:\s*`([^`]+)`', block)
-                if hw_match:
-                    node_data['hardware'] = hw_match.group(1)
-                
-                # Extract short name
-                short_match = re.search(r'short_name:\s*`([^`]+)`', block)
-                if short_match:
-                    node_data['short_name'] = short_match.group(1)
-                
-                # Extract long name
-                long_match = re.search(r'long_name:\s*`([^`]+)`', block)
-                if long_match:
-                    long_name = long_match.group(1)
-                    # Decode HTML entities
-                    long_name = long_name.replace('&lt;', '<').replace('&gt;', '>')
-                    node_data['long_name'] = long_name
-                
-                # Extract channel
-                channel_match = re.search(r'channel:\s*`([^`]+)`', block)
-                if channel_match:
-                    node_data['channel'] = channel_match.group(1)
-                
-                nodes.append(node_data)
-                    
+                node_data = self._extract_node_fields(block)
+                if node_data:
+                    batch_nodes.append(node_data)
             except Exception as e:
                 logger.debug(f"Failed to parse node: {e}")
                 continue
-        
-        logger.info(f"Parsed {len(nodes)} nodes from raw data")
-        return nodes
+                
+        return batch_nodes
     
-    def _parse_meshview_edges(self, js_str: str) -> List[Dict]:
-        """Parse edges in the meshview.bayme.sh format."""
+    @lru_cache(maxsize=1000)
+    def _extract_node_fields(self, block: str) -> Optional[Dict]:
+        """Extract node fields using cached regex matches."""
+        node_data = {}
+        
+        # Extract name (node ID) and convert to hex format
+        name_match = self._field_regexes['name'].search(block)
+        if not name_match:
+            return None
+            
+        name_str = name_match.group(1)
+        # Optimized hex conversion
+        node_data.update(self._convert_to_hex_fast(name_str))
+        
+        # Extract other fields efficiently
+        for field, regex in self._field_regexes.items():
+            if field == 'name':
+                continue
+                
+            match = regex.search(block)
+            if match:
+                value = match.group(1)
+                if field == 'value':
+                    node_data['label'] = self._clean_label_fast(value)
+                elif field == 'long_name':
+                    node_data['long_name'] = value.replace('&lt;', '<').replace('&gt;', '>')
+                else:
+                    node_data[field] = value
+        
+        # Set default role if not found
+        if 'role' not in node_data:
+            node_data['role'] = 'CLIENT'
+            
+        return node_data
+    
+    @lru_cache(maxsize=10000)
+    def _convert_to_hex_fast(self, name_str: str) -> Dict:
+        """Fast hex conversion with caching."""
+        try:
+            if name_str.startswith('0x') or name_str.startswith('!'):
+                return {'id': name_str, 'hex_name': name_str}
+            else:
+                name_int = int(name_str)
+                hex_name = f"!{name_int:08x}"
+                return {
+                    'id': hex_name,
+                    'hex_name': hex_name,
+                    'original_name': name_str
+                }
+        except ValueError:
+            return {'id': name_str, 'hex_name': name_str}
+    
+    @lru_cache(maxsize=1000)
+    def _clean_label_fast(self, label: str) -> str:
+        """Fast label cleaning with caching."""
+        label = label.strip('"')
+        try:
+            return label.encode('utf-8').decode('unicode_escape')
+        except:
+            return label
+    
+    def _parse_edges_fast(self, script_content: str) -> List[Dict]:
+        """Fast edge parsing with optimized regex."""
+        edges_match = self._edge_regex.search(script_content)
+        if not edges_match:
+            return []
+            
+        edges_str = edges_match.group(1)
+        
+        # Use more efficient regex for edge objects
+        edge_pattern = re.compile(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}')
+        edge_matches = edge_pattern.finditer(edges_str)
+        
         edges = []
-        
-        # Use regex to extract each edge object
-        edge_pattern = r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
-        
-        # Find all edge objects
-        edge_matches = re.finditer(edge_pattern, js_str)
+        edge_regexes = {
+            'source': re.compile(r'source:\s*`([^`]+)`'),
+            'target': re.compile(r'target:\s*`([^`]+)`'),
+            'originalColor': re.compile(r'originalColor:\s*`([^`]+)`'),
+            'width': re.compile(r'width:\s*(\d+(?:\.\d+)?)')
+        }
         
         for match in edge_matches:
             edge_str = match.group(0)
@@ -198,30 +264,25 @@ class MeshDataFetcher:
             try:
                 edge_data = {}
                 
-                # Extract source
-                source_match = re.search(r'source:\s*`([^`]+)`', edge_str)
-                if source_match:
-                    edge_data['from'] = source_match.group(1)
+                # Extract source and target with hex conversion
+                source_match = edge_regexes['source'].search(edge_str)
+                target_match = edge_regexes['target'].search(edge_str)
                 
-                # Extract target
-                target_match = re.search(r'target:\s*`([^`]+)`', edge_str)
-                if target_match:
-                    edge_data['to'] = target_match.group(1)
-                
-                # Extract color (for weight estimation)
-                color_match = re.search(r'originalColor:\s*`([^`]+)`', edge_str)
-                if color_match:
-                    edge_data['originalColor'] = color_match.group(1)
-                
-                # Extract line width if available
-                width_match = re.search(r'width:\s*(\d+(?:\.\d+)?)', edge_str)
-                if width_match:
-                    edge_data['weight'] = float(width_match.group(1)) / 2.0
-                else:
-                    edge_data['weight'] = 1.0
-                
-                # Only add if we have both source and target
-                if 'from' in edge_data and 'to' in edge_data:
+                if source_match and target_match:
+                    edge_data['from'] = self._convert_edge_id_fast(source_match.group(1))
+                    edge_data['to'] = self._convert_edge_id_fast(target_match.group(1))
+                    
+                    # Extract other fields
+                    color_match = edge_regexes['originalColor'].search(edge_str)
+                    if color_match:
+                        edge_data['originalColor'] = color_match.group(1)
+                    
+                    width_match = edge_regexes['width'].search(edge_str)
+                    if width_match:
+                        edge_data['weight'] = float(width_match.group(1)) / 2.0
+                    else:
+                        edge_data['weight'] = 1.0
+                    
                     edges.append(edge_data)
                     
             except Exception as e:
@@ -229,7 +290,19 @@ class MeshDataFetcher:
                 continue
         
         return edges
-            
+    
+    @lru_cache(maxsize=10000)
+    def _convert_edge_id_fast(self, id_str: str) -> str:
+        """Fast edge ID conversion with caching."""
+        try:
+            if id_str.startswith('0x') or id_str.startswith('!'):
+                return id_str
+            else:
+                id_int = int(id_str)
+                return f"!{id_int:08x}"
+        except ValueError:
+            return id_str
+        
     def parse_node_data(self, nodes_data: List[Dict]) -> Dict:
         """
         Parse and normalize node data.
