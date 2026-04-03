@@ -1065,7 +1065,7 @@ class EnhancedNetworkVisualizer(QWidget):
         
     def _generate_enhanced_html(self, fig, restore_selected_node=None):
         """Generate HTML with enhanced JavaScript for better interactivity."""
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.html', encoding='utf-8', delete=False) as f:
             html_str = fig.to_html(
                 include_plotlyjs='inline',  # Use inline instead of CDN to avoid loading issues
                 config={
